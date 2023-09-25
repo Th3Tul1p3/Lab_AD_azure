@@ -1,3 +1,36 @@
+$region = "EastUS"
+$rgName = "Lab-AD-rg"
+$rgwatcher = "NetworkWatcherRG"
+
+$vnetName = "Lab-AD-vnet-01"
+$vnetRange = "10.1.0.0/16"
+$vm1IPAddress = "10.1.10.10"
+$vm2IPAddress = "10.1.30.30"
+$vm3IPAddress = "10.1.30.31"
+$subnet1Name = "domain-ad"
+$subnet1Range = "10.1.10.0/24"
+$subnet2Name = "client"
+$vm1Name = "vm-a-dc01"
+$vm2Name = "vm-client-1"
+$vm3Name = "vm-client-2"
+$subnet2Range = "10.1.30.0/24"
+
+$nsg1Name = "Lab-AD-nsg-a-ad"
+$vmPass = '3GzUTdBU84Wn#ksL2y7Kw*sY'
+$userPass = '$vmPass'
+
+# generate name for storage 
+$TokenSet = @{
+        L = [Char[]]'abcdefghijklmnopqrstuvwxyz'
+        N = [Char[]]'0123456789'
+    }
+$Lower = Get-Random -Count 12 -InputObject $TokenSet.L
+$Number = Get-Random -Count 5 -InputObject $TokenSet.N
+$StringSet =  $Lower + $Number 
+$storageName = (Get-Random -Count 20 -InputObject $StringSet) -join '' # must be in lower case 
+$storageSku = "Standard_LRS"
+$storageKind = "StorageV2"
+
 # create RG
 az group create -l $region -n $rgName
 
@@ -5,18 +38,5 @@ az group create -l $region -n $rgName
 az network vnet create -g $rgName -n $vnetName --address-prefix $vnetRange --subnet-name $subnet1Name --subnet-prefixes $subnet1Range
 az network vnet subnet create -g $rgName --vnet-name $vnetName -n $subnet2Name --address-prefixes $subnet2Range
 
-
 # create storage 
 az storage account create -n $storageName -g $rgName --sku $storageSku --kind $storageKind
-
-# Create NSG - A-DC
-az network nsg create -n $nsg1Name -g $rgName
-
-# Add rules to NSG to allow AD traffic
-az network vnet subnet update -g $rgName -n $subnet1Name --vnet-name $vnetName --network-security-group $nsg1Name
-az network nsg rule create --nsg-name $nsg1Name -g $rgName -n "Allow_RDP" --priority 100 --access "allow" --destination-address-prefixes $subnet1Range --destination-port-ranges "3389" --protocol "TCP" --description "Allow RDP"
-az network nsg rule create --nsg-name $nsg1Name -g $rgName -n "Allow_AD_TCP" --priority 110 --access "allow" --source-address-prefixes $subnet1Range $subnet2Range  --destination-address-prefixes $subnet1Range --destination-port-ranges 135 389 636 53 88 445 49152-65535 --protocol "TCP" --description "Allow AD traffic TCP"
-az network nsg rule create --nsg-name $nsg1Name -g $rgName -n "Allow_AD_UDP" --priority 111 --access "allow" --source-address-prefixes $subnet1Range $subnet2Range  --destination-address-prefixes $subnet1Range --destination-port-ranges 53 88 389 --protocol "UDP" --description "Allow AD traffic UDP"
-az network nsg rule create --nsg-name $nsg1Name -g $rgName -n "Deny_Inbound" --priority 4000 --access "deny" --source-address-prefixes "*" --destination-address-prefixes $subnet1Range --destination-port-ranges "*" --protocol "*" --description "Deny inbound traffic"
-
-az network vnet subnet update -g $rgName -n $subnet1Name --vnet-name $vnetName --network-security-group $nsg1Name
