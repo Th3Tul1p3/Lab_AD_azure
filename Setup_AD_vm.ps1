@@ -11,11 +11,6 @@ az network nsg rule create --nsg-name $nsg1Name -g $rgName -n "Deny_Inbound" --p
 az network vnet subnet update -g $rgName -n $subnet1Name --vnet-name $vnetName --network-security-group $nsg1Name
 
 # Create VM
-$vm1Image = "Win2022Datacenter"
-$vm1User = "lcladmin"
-$vm1Pass = $vmPass
-$vm1Size = "Standard_B2ms"
-$vm1DiskGuid = [guid]::NewGuid().ToString().Replace("-","").Substring(0,10)
 az vm create -n $vm1Name -g $rgName --image $vm1Image --admin-username $vm1User --admin-password $vm1Pass --computer-name $vm1Name --size $vm1Size --vnet-name $vnetName --subnet $subnet1Name --private-ip-address $vm1IPAddress --storage-account $storageName --use-unmanaged-disk --os-disk-name "$($vm1Name)-OSdisk-$($vm1DiskGuid)" --nsg '""' --public-ip-address '""'
 
 
@@ -25,9 +20,8 @@ az vm create -n $vm1Name -g $rgName --image $vm1Image --admin-username $vm1User 
 # Add public domain 'contoso.com' as UPN suffix
 $dcA1Domain="corp.local"
 $dcA1DomainNetbios="corp"
-
 $scriptADC01_1 = @"
-Set-TimeZone -id 'E. Australia Standard Time'
+Set-TimeZone -id 'W. Europe Standard Time'
 `$disks = Get-Disk | Where partitionstyle -eq 'raw'
 If (`$disks) {
   `$disks | Initialize-Disk -PartitionStyle MBR -PassThru | New-Partition -UseMaximumSize -DriveLetter ""G"" | Format-Volume -FileSystem NTFS -NewFileSystemLabel ""Data"" -Confirm:`$false -Force
@@ -60,8 +54,7 @@ Install-ADDSForest -DomainName `$domain -SafeModeAdministratorPassword (convertt
 
 az vm run-command invoke --command-id RunPowerShellScript --name $vm1Name -g $rgName --scripts $scriptADC01_1
 
-$dcA2UPNSuffix = "contoso.com"
-
+$dcA2UPNSuffix = "senthorus.com"
 $scriptADC01_2 = @"
 try{
   Import-Module ActiveDirectory -ErrorAction Stop
@@ -75,5 +68,78 @@ if ((Get-ADForest).UPNsuffixes -notcontains ""$dcA2UPNSuffix""){
 "@
 az vm run-command invoke --command-id RunPowerShellScript --name $vm1Name -g $rgName --scripts $scriptADC01_2
 
+$scriptADC02_3 = @"
+try{
+  Import-Module ActiveDirectory -ErrorAction Stop
+}catch{
+  throw ""Module ActiveDirectory not installed""
+}
 
+function Create-TestUsers {
+  param(
+    [parameter(Mandatory=`$true)] [array]`$UserList,
+    [parameter(Mandatory=`$true)] [string]`$UserPass,
+    [parameter(Mandatory=`$true)] [string]`$DomainSuffix,
+    [parameter(Mandatory=`$true)] [string]`$OUPath
+  )
 
+  # https://365lab.net/2014/01/08/create-test-users-in-a-domain-with-powershell/
+  `$departments = @(""IT"",""Finance"",""Logistics"",""Sourcing"",""Human Resources"")
+  ForEach(`$user in `$userList){
+    `$firstname = (Get-Culture).TextInfo.ToTitleCase(`$user.Firstname)
+    `$lastname = (Get-Culture).TextInfo.ToTitleCase(`$user.Lastname)
+    `$i = get-random -Minimum 0 -Maximum `$departments.count
+    `$department = `$departments[`$i]
+    `$username = `$firstname.Substring(0,2).tolower() + `$lastname.Substring(0,4).tolower()
+    `$exit = 0
+    `$count = 1
+    do {
+      try {
+        `$userexists = Get-AdUser -Identity `$username
+        `$username = `$firstname.Substring(0,2).tolower() + `$lastname.Substring(0,4).tolower() + `$count++
+      } catch {
+        `$exit = 1
+      }
+    } while (`$exit -eq 0)
+    `$displayname = `$firstname + "" "" + `$lastname
+    `$upn = `$username + ""@"" + `$DomainSuffix
+    `$email = `$firstname + ""."" + `$lastname + ""@"" + `$DomainSuffix
+    Write-Host ""Creating user `$username in `$OUPath""
+    New-ADUser -Name `$displayName -DisplayName `$displayName -SamAccountName `$username -UserPrincipalName `$upn -EmailAddress `$email -GivenName `$firstname -Surname `$lastname -description ""Test User"" -Path `$OUPath -Enabled `$true -ChangePasswordAtLogon `$false -Department `$Department -AccountPassword (ConvertTo-SecureString `$userPass -AsPlainText -force)
+  }
+}
+
+`$userOU = ""ou=Staff,ou=S_USERS,$dcA2DomainDN""
+`$userPass = '$userPass'
+`$usersCSV = ""Firstname;Lastname
+barry;tycholiz
+benjamin;rogers
+bill;rapp
+bill;williams
+brad;mckay
+cara;semperger
+carol;stclair
+chris;dorland
+chris;germany
+chris;stokley
+cooper;richey
+craig;dean
+dana;davis
+danny;mccarty
+dan;hyvl
+daren;farmer
+darrell;schoolcraft
+darron;cgiron
+david;delainey""
+`$userList = `$usersCSV | ConvertFrom-CSV -Delimiter "";""
+
+`$users = Get-ADUser -Filter * -SearchBase `$userOU | select -expand samAccountName
+If ((`$users) -eq `$null) {
+  Create-TestUsers `$userList `$userPass ""$dcA2UPNSuffix"" `$userOU
+}
+`$users = Get-ADUser -Filter * -SearchBase `$userOU | select -expand samAccountName
+`$group = ""Grp_AllStaff""
+Add-ADGroupMember -Identity `$group -Members `$users
+
+"@
+az vm run-command invoke --command-id RunPowerShellScript --name $vm2Name -g $rgName --scripts $scriptADC02_3
