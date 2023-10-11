@@ -4,6 +4,6 @@
 & "$PSScriptRoot/Setup_structure.ps1"
 
 # setup Vm for AD + Setup ad ds 
-& "$PSScriptRoot/Setup_AD_vm.ps1"
+& "$PSScriptRoot/Create_VM.ps1"
 
 # Setup clients, VM, join AD
